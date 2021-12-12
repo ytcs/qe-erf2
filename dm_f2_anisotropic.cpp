@@ -3,58 +3,69 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <map>
 #include <complex>
 #include <limits>
 #include <vector>
 #include <valarray>
 #include <cmath>
 
-// Change these values according to your QE calculation
-const int n_k = 27;
+
+std::string calc_name = "f2";
 const int g_max = 20;
-const int n_band = 144;
-const int n_valence = 40;
-const double alat = 8.4059; // a.u.
-const double tpiba=M_PI*2/alat;
-const std::valarray<double> b1 = {1,0,0};
-const std::valarray<double> b2 = {0,1,0};
-const std::valarray<double> b3 = {0,0,1};
+int n_k, n_band, n_valence, Ebins, qbins, qbin0;
+double alat, tpiba, dq, dE;
+std::map<std::string,std::string> datfile = {
+    {"Ek","Ek.dat"},
+    {"klist","klist.dat"},
+    {"glist","glist.dat"},
+    {"ui","ui.dat"}
+};
 
-// binning settings
-const double dq = 0.2;
-const double dE = 0.1; //eV
-const int Ebins=50;
-const int qbins=51; // odd numbers to include q=0
-const int qbin0=(qbins-1)/2
-// -----------------------------------------------------
-
+std::map<std::string,std::valarray<double>> basis = {
+    {"b1",{1,0,0}},
+    {"b2",{0,1,0}},
+    {"b3",{0,0,1}}
+};
 
 std::vector< std::valarray<double> > read_klist(std::string fname);
 std::vector< std::vector<double> >  read_Ek(std::string fname);
 std::vector< std::vector< std::valarray<double> > >  read_glist(std::string fname);
 std::vector< std::vector< std::vector<std::complex<double> > > > read_ui(std::string fname, const std::vector< std::vector< std::valarray<double> > >& g_list);
 std::vector<std::vector< std::vector< std::vector<int> > > > build_index(const std::vector< std::vector< std::valarray<double> > >& g_list);
-
+std::map<std::string,double> read_config(std::string fname);
 
 
 int main(int argc, char *argv[]){
     int ki=0;
     //int kpi=0;
-    if(argc>1){
-        ki= atoi(argv[1]);
-        //kpi= atoi(argv[2]);
+    if(argc<3){
+        std::cout << "Usage: dmf2 [Path to config file] [Index of k-point]" << std::endl;
+        exit(0);
     }
 
+    auto config = read_config(argv[1]);
+    ki= atoi(argv[2]);
 
-    auto k_list = read_klist("klist.dat");
-    auto E_ki   = read_Ek("Ek.dat");
-    auto g_list = read_glist("glist.dat");
-    auto u_kgi = read_ui("ui.dat",g_list);
-    auto g_index = build_index(g_list); // for fast lookup
+    n_k = (int) round(config["n_k"]);
+    n_band = (int) round(config["n_band"]);
+    n_valence = (int) round(config["n_valence"]);
+    alat = config["alat"];
+    tpiba = M_PI*2/alat;
+    Ebins=(int) round(config["Ebins"]);
+    qbins=(int) round(config["qbins"]);
+    qbin0 = (qbins-1)/2;
+    dq=config["dq"];
+    dE=config["dE"];
 
+    auto k_list = read_klist(datfile["klist"]);
+    auto E_ki   = read_Ek(datfile["Ek"]);
+    auto g_list = read_glist(datfile["glist"]);
+    auto u_kgi = read_ui(datfile["ui"],g_list);
+    auto g_index = build_index(g_list); // for fast lookup 
     
     std::vector<std::vector<std::vector<std::vector<double>>>> f_crystal(qbins,std::vector<std::vector<std::vector<double>>>(qbins,std::vector<std::vector<double>>(qbins,std::vector<double>(Ebins,0))));
-
+    
     std::valarray<double> q_vec;
     double E;
     int qix,qiy,qiz,Ei;
@@ -63,23 +74,22 @@ int main(int argc, char *argv[]){
     std::complex<double> f,x;
     // for(int ki=0; ki<n_k; ++ki){
     for(int kpi=0; kpi<n_k; ++kpi){
-    std::cout<< ki << kpi << std::endl;
-    for(int i=0; i<n_valence; ++i){
-    for(int ip=n_valence; ip<n_band; ++ip){
-    for( auto gp : g_list[kpi] ){
-        
-        q_vec = tpiba*(gp[0]*b1+gp[1]*b2+gp[2]*b3)+k_list[kpi]-k_list[ki];
-        
-        E = (E_ki[kpi][ip]-E_ki[ki][i]);
-
+    for(auto gp : g_list[kpi] ){
+        q_vec = tpiba*(gp[0]*basis["b1"]+gp[1]*basis["b2"]+gp[2]*basis["b3"])+k_list[kpi]-k_list[ki];
         qix = int(q_vec[0]/dq);
         qiy = int(q_vec[1]/dq);
         qiz = int(q_vec[2]/dq);
-        Ei = int(E/dE);
-
-        if( std::abs(qix) >= qbins/2 || std::abs(qiy) >= qbins/2 || std::abs(qiz) >=qbins/2 || Ei >=Ebins){
+        if( std::abs(qix) >= qbins/2 || std::abs(qiy) >= qbins/2 || std::abs(qiz) >=qbins/2 ){
             continue;
         }
+    for(int i=0; i<n_valence; ++i){
+    for(int ip=n_valence; ip<n_band; ++ip){
+        E = (E_ki[kpi][ip]-E_ki[ki][i]);
+        Ei = int(E/dE);
+        if (Ei >=Ebins){
+            continue;
+        }
+
 
         f=0;
         for(int gi=0; gi<g_list[ki].size(); ++gi){
@@ -91,11 +101,8 @@ int main(int argc, char *argv[]){
             if(gpi<0){
                 continue;
             }
-
-            f += u_kgi[ki][gi][i]*std::conj(u_kgi[kpi][gpi][ip]);
-            
-        }
-      
+            f += u_kgi[ki][gi][i]*std::conj(u_kgi[kpi][gpi][ip]);            
+        }      
         f_crystal[qbin0+qix][qbin0+qiy][qbin0+qiz][Ei] += std::pow( std::real(std::abs(f)) ,2);        
     }
     }
@@ -104,7 +111,7 @@ int main(int argc, char *argv[]){
     // }
 
     // write to file
-    std::string output_fname = "f2_anisotropic_" + std::to_string(ki)+".dat";
+    std::string output_fname = calc_name+"_aniso_" + std::to_string(ki)+".dat";
     std::ofstream f_crystal_fs(output_fname);
     for(qix=0; qix<qbins;++qix){
         for(qiy=0; qiy<qbins;++qiy){
@@ -121,12 +128,80 @@ int main(int argc, char *argv[]){
 }
 
 
+std::vector<std::string> split(std::string text, char delim) {
+    std::string line;
+    std::vector<std::string> vec;
+    std::stringstream ss(text);
+    while(std::getline(ss, line, delim)) {
+        vec.push_back(line);
+    }
+    return vec;
+}
+
+std::map<std::string,double> read_config(std::string fname){
+    std::map<std::string,double> output;
+    std::ifstream config_fs(fname);
+
+    // Config file format
+    // name=silicon_k333
+    // Ek=Ek.dat
+    // klist=klist.dat
+    // glist=glist.dat
+    // ui=ui.dat
+    // n_k=27
+    // g_max=20
+    // n_band=144
+    // n_valence=40
+    // alat=8.4059 
+    // b1=1 0 0
+    // b2=0 1 0
+    // b3=0 0 1
+    // dq=0.2
+    // dE=0.1 
+    // Ebins=50
+    // qbins=51
+
+    if(!config_fs.is_open()){
+        std::cout << "Failed to open config file "<< fname << std::endl;
+        exit(-1);
+    }
+
+    std::string line;
+    while(std::getline(config_fs,line))
+    {
+        std::istringstream line_is(line);
+        std::string key;
+        if(std::getline(line_is,key,'=')){
+            std::string value;
+            if(std::getline(line_is,value)){
+                if(key=="Ek" || key=="glist" || key=="klist"||key=="ui"){
+                    datfile[key] = value;
+                }else if(key=="b1" || key=="b2" || key=="b3"){
+                    std::vector<std::string> vec = split(value,' ');
+                    if(vec.size() < 3){
+                        std::cout << "Basis vector not enough components" << std::endl;
+                        exit(-1);
+                    }
+                    basis[key] = {std::stod(vec[0]),std::stod(vec[1]),std::stod(vec[2])};
+                }else if(key=="name"){
+                    calc_name = value;
+                }else{
+                    output[key]=std::stod(value);
+                }
+                
+            }            
+        }
+    }
+
+    return output;
+}
+
 std::vector< std::valarray<double> > read_klist(std::string fname){
     std::vector< std::valarray<double> > k_list;    
     std::ifstream k_list_fs(fname);
 
     if(!k_list_fs.is_open()){
-        std::cout << "Failed to open klist file!" << std::endl;
+        std::cout << "Failed to open klist file" << fname << std::endl;
         exit(-1);
     }
 
@@ -143,7 +218,7 @@ std::vector< std::vector<double> >  read_Ek(std::string fname){
     std::ifstream E_ki_fs(fname);
 
     if(!E_ki_fs.is_open()){
-        std::cout << "Failed to open Ek file!" << std::endl;
+        std::cout << "Failed to open Ek file"<< fname << std::endl;
         exit(-1);
     }
 
@@ -166,7 +241,7 @@ std::vector< std::vector< std::valarray<double> > >  read_glist(std::string fnam
     std::ifstream g_list_fs(fname);
 
     if(!g_list_fs.is_open()){
-        std::cout << "Failed to open glist file!" << std::endl;
+        std::cout << "Failed to open glist file"<<fname << std::endl;
         exit(-1);
     }
 
@@ -193,7 +268,7 @@ std::vector< std::vector< std::vector<std::complex<double> > > > read_ui(std::st
 
     std::ifstream u_kgi_fs(fname);
     if(!u_kgi_fs.is_open()){
-        std::cout << "Failed to open ui file!" << std::endl;
+        std::cout << "Failed to open ui file" << fname << std::endl;
         exit(-1);
     }
 
