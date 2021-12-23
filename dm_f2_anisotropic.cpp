@@ -10,30 +10,16 @@
 #include <valarray>
 #include <cmath>
 
-
-std::string calc_name = "f2";
 const int g_max = 20;
 int n_k, n_band, n_valence, Ebins, qbins, qbin0;
 double alat, tpiba, dq, dE;
-std::map<std::string,std::string> datfile = {
-    {"Ek","Ek.dat"},
-    {"klist","klist.dat"},
-    {"glist","glist.dat"},
-    {"ui","ui.dat"}
-};
-
-std::map<std::string,std::valarray<double>> basis = {
-    {"b1",{1,0,0}},
-    {"b2",{0,1,0}},
-    {"b3",{0,0,1}}
-};
 
 std::vector< std::valarray<double> > read_klist(std::string fname);
 std::vector< std::vector<double> >  read_Ek(std::string fname);
 std::vector< std::vector< std::valarray<double> > >  read_glist(std::string fname);
 std::vector< std::vector< std::vector<std::complex<double> > > > read_ui(std::string fname, const std::vector< std::vector< std::valarray<double> > >& g_list);
 std::vector<std::vector< std::vector< std::vector<int> > > > build_index(const std::vector< std::vector< std::valarray<double> > >& g_list);
-std::map<std::string,double> read_config(std::string fname);
+std::map<std::string,double> read_config(std::string fname,std::map<std::string,std::string>& datfile, std::map<std::string,std::valarray<double>>& basis,std::string& calc_name);
 
 
 int main(int argc, char *argv[]){
@@ -44,7 +30,22 @@ int main(int argc, char *argv[]){
         exit(0);
     }
 
-    auto config = read_config(argv[1]);
+    std::string calc_name = "f2";
+    std::map<std::string,std::string> datfile = {
+        {"Ek","Ek.dat"},
+        {"klist","klist.dat"},
+        {"glist","glist.dat"},
+        {"ui","ui.dat"}
+    };
+
+    std::map<std::string,std::valarray<double>> basis = {
+        {"b1",{1,0,0}},
+        {"b2",{0,1,0}},
+        {"b3",{0,0,1}}
+    };
+    
+    auto config = read_config(argv[1],datfile,basis,calc_name);
+
     ki= atoi(argv[2]);
 
     n_k = (int) round(config["n_k"]);
@@ -56,7 +57,7 @@ int main(int argc, char *argv[]){
     qbins=(int) round(config["qbins"]);
     qbin0 = (qbins-1)/2;
     dq=config["dq"];
-    dE=config["dE"];
+    dE=config["dE"];    
 
     auto k_list = read_klist(datfile["klist"]);
     auto E_ki   = read_Ek(datfile["Ek"]);
@@ -72,8 +73,11 @@ int main(int argc, char *argv[]){
 
     int gpi;
     std::complex<double> f,x;
+    
     // for(int ki=0; ki<n_k; ++ki){
     for(int kpi=0; kpi<n_k; ++kpi){
+        
+        std::cout << std::to_string(kpi+1) << '/' << std::to_string(n_k) << std::endl;
     for(auto gp : g_list[kpi] ){
         q_vec = tpiba*(gp[0]*basis["b1"]+gp[1]*basis["b2"]+gp[2]*basis["b3"])+k_list[kpi]-k_list[ki];
         qix = int(q_vec[0]/dq);
@@ -109,7 +113,7 @@ int main(int argc, char *argv[]){
     }
     }
     // }
-
+    
     // write to file
     std::string output_fname = calc_name+"_aniso_" + std::to_string(ki)+".dat";
     std::ofstream f_crystal_fs(output_fname);
@@ -123,7 +127,7 @@ int main(int argc, char *argv[]){
             }
         }
     }
-
+    f_crystal_fs.close();
     return 0;
 }
 
@@ -138,7 +142,7 @@ std::vector<std::string> split(std::string text, char delim) {
     return vec;
 }
 
-std::map<std::string,double> read_config(std::string fname){
+std::map<std::string,double> read_config(std::string fname,std::map<std::string,std::string>& datfile, std::map<std::string,std::valarray<double>>& basis,std::string& calc_name){
     std::map<std::string,double> output;
     std::ifstream config_fs(fname);
 
@@ -187,8 +191,7 @@ std::map<std::string,double> read_config(std::string fname){
                     calc_name = value;
                 }else{
                     output[key]=std::stod(value);
-                }
-                
+                }                
             }            
         }
     }
@@ -290,9 +293,15 @@ std::vector< std::vector< std::vector<std::complex<double> > > > read_ui(std::st
 std::vector<std::vector< std::vector< std::vector<int> > > > build_index(const std::vector< std::vector< std::valarray<double> > >& g_list){
     std::vector<std::vector< std::vector< std::vector<int> > > > g_index(n_k, std::vector< std::vector< std::vector<int> > >(2*g_max, std::vector< std::vector<int> >(2*g_max,std::vector<int>(2*g_max,-1))));
     
-    int g_ind;
+    int g_ind,gx,gy,gz;
     for(int ki=0; ki<n_k; ++ki){
-        for(int gi=0; gi<g_list[ki].size();++gi){            
+        for(int gi=0; gi<g_list[ki].size();++gi){     
+            gx = int(g_list[ki][gi][0]);
+            gy = int(g_list[ki][gi][1]);
+            gz = int(g_list[ki][gi][2]);
+            if(abs(gx)>= g_max||abs(gy)>=g_max || abs(gz)>=g_max){
+                continue;
+            }    
             g_index[ki][int(g_list[ki][gi][0])+g_max][int(g_list[ki][gi][1])+g_max][int(g_list[ki][gi][2])+g_max] = gi;
         }
     }
